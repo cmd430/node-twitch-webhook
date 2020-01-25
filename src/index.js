@@ -188,7 +188,9 @@ class TwitchWebhook extends EventEmitter {
         throw new errors.RequestDenied(err)
       })
       .then(response => {
-        this._subscriptions[topic] = {}
+        if (!this._subscriptions[topic]) {
+          this._subscriptions[topic] = {}
+        }
         if (this._options.secret) {
           this._subscriptions[topic].secret = requestOptions.qs['hub.secret']
         }
@@ -200,10 +202,18 @@ class TwitchWebhook extends EventEmitter {
    *
    * @param {string} topic - Topic name
    * @param {Object} options - Topic options
+   * @param {Boolean} auto_renew - Auto renew subscription
    * @throws {RequestDenied} If hub finds any errors in the request
    * @return {Promise}
    */
-  subscribe (topic, options = {}) {
+  subscribe (topic, options = {}, auto_renew = false) {
+    if (auto_renew === true) {
+      this._subscriptions[topic] = {}
+      this._subscriptions[topic].auto_renew = setTimeout(() => {
+        this.subscribe(topic, options, auto_renew)
+        //console.debug(`Renewed: ${topic}`)
+      }, (this._options.lease_seconds - 5) * 1000) 
+    }
     return this._request('subscribe', topic, options)
   }
 
@@ -217,11 +227,23 @@ class TwitchWebhook extends EventEmitter {
    */
   unsubscribe (topic, options = {}) {
     if (topic !== '*') {
+      if (this._subscriptions[topic]) {
+        if (this._subscriptions[topic].auto_renew) {
+          clearTimeout(this._subscriptions[topic].auto_renew)
+          //console.debug(`Auto renew cacelled for: ${topic}`)
+        }
+      }
       return this._request('unsubscribe', topic, options)
     }
 
     let poll = []
     for (let topic of Object.keys(this._subscriptions)) {
+      if (this._subscriptions[topic]) {
+        if (this._subscriptions[topic].auto_renew) {
+          clearTimeout(this._subscriptions[topic].auto_renew)
+          //console.debug(`Auto renew cacelled for: ${topic}`)
+        }
+      }
       poll.push(() => this._request('unsubscribe', topic))
     }
     return Promise.all(poll)
